@@ -382,7 +382,10 @@ export default class Transport {
     }
 
     private _processTransmit(receiver: string,data: any,dataType: DataType) {
-        try {this.onTransmit(receiver,data,dataType)}
+        try {
+            const res = this.onTransmit(receiver,data,dataType);
+            if(res instanceof Promise) res.catch(err => this._onListenerError(err));
+        }
         catch(err) {this._onListenerError(err)}
     }
 
@@ -392,14 +395,14 @@ export default class Transport {
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 return this._processData(packet['2'],packet['3'],packet['4'],(err,data) => {
                     if(!err) this._processTransmit(packet['1'],data,packet['2']);
-                    else this.onInvalidMessage(err);
+                    else if(!(err instanceof BadConnectionError)) this.onInvalidMessage(err);
                 });
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
                 return this._processData(packet['3'],packet['4'],packet['5'],(err,data) => {
                     if(!err) this._processInvoke(packet['1'],packet['2'],data,packet['3']);
-                    else this.onInvalidMessage(err);
+                    else if(!(err instanceof BadConnectionError)) this.onInvalidMessage(err);
                 });
             case PacketType.InvokeDataResp:
                 const resp = this._invokeResponsePromises[packet['1']];
@@ -408,6 +411,7 @@ export default class Transport {
                     delete this._invokeResponsePromises[packet['1']];
                     return this._processData(packet['2'],packet['3'],packet['4'], (err,data) => {
                         if(!err) resp.resolve(resp.returnDataType ? [data,packet['2']] : data);
+                        else if(err instanceof BadConnectionError) resp.reject(err);
                         else this.onInvalidMessage(err);
                     })
                 }
@@ -502,11 +506,16 @@ export default class Transport {
         let called;
         try {
             const badConnectionTimestamp = this.badConnectionStamp;
-            this.onInvoke(procedure, data,(data, processComplexTypes) => {
+            const res = this.onInvoke(procedure, data,(data, processComplexTypes) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
                 if(badConnectionTimestamp !== this.badConnectionStamp) return;
-                this._sendInvokeDataResp(callId, data, processComplexTypes);
+                try {this._sendInvokeDataResp(callId, data, processComplexTypes);}
+                catch (err) {
+                    //allow to reject the invoke when the response could not be sent
+                    called = false;
+                    throw err;
+                }
             }, (err) => {
                 if(called) throw new InvalidActionError('Response ' + callId + ' has already been sent');
                 called = true;
@@ -514,6 +523,7 @@ export default class Transport {
                 this.send(PacketType.InvokeErrResp + ',' +
                     callId + ',' + (err instanceof JSONString ? JSONString.toString() : encodeJson(dehydrateError(err))));
             },dataType);
+            if(res instanceof Promise) res.catch(err => this._onListenerError(err));
         }
         catch(err) {this._onListenerError(err);}
     }
@@ -569,7 +579,7 @@ export default class Transport {
     private _processData(type: DataType, data: any, dataMetaInfo: any, callback: (err?: Error | null,data?: any) => void) {
         if (type === DataType.JSON) return callback(null,data);
         else if (type === DataType.Binary) {
-            if(typeof data !== 'number') callback(new Error('Invalid binary packet id.'));
+            if(typeof data !== 'number') return callback(new Error('Invalid binary packet id.'));
             this._resolveBinaryContent(data,(err,binaries) => {
                 err ? callback(err) : callback(null,binaries![0]);
             });
@@ -585,7 +595,7 @@ export default class Transport {
             })
             else return callback(null,this._resolveMixedJSONDeep(data,resolveOptions));
         } else if(type === DataType.Stream && this.options.streamsEnabled) {
-            if(typeof data !== 'number') callback(new Error('Invalid stream id.'));
+            if(typeof data !== 'number') return callback(new Error('Invalid stream id.'));
             return callback(null,new this.options.readStream(data,this));
         }
         else callback(new Error('Invalid data type.'));
