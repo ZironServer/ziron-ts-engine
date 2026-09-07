@@ -127,9 +127,16 @@ export default class PackageBuffer {
      * Clears the buffer.
      */
     public clearBuffer() {
+        const dropped = this._buffer;
         this._buffer = [];
         this._bufferSize = 0;
         this._clearBufferTimeout();
+        for(let i = 0; i < dropped.length; i++) {
+            if(dropped[i]._onDrop) {
+                try {dropped[i]._onDrop!();}
+                catch (_) {}
+            }
+        }
     }
 
     private _onBatchTimeout = () => {

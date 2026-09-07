@@ -869,6 +869,8 @@ export default class Transport {
 
         if(!processComplexTypes) {
             pack.promise = new Promise<any>((resolve, reject) => {
+                pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
+                    'The invoke package was dropped from the buffer.'));
                 pack._afterSend = () => {
                     this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
                     this._invokeResponsePromises[callId].timeout = setTimeout(() => {
@@ -885,6 +887,8 @@ export default class Transport {
             let setResponse: (() => void) | undefined = undefined;
             let setResponseTimeout: (() => void) | undefined = undefined;
             pack.promise = new Promise<any>((resolve, reject) => {
+                pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
+                    'The invoke package was dropped from the buffer.'));
                 setResponse = () => {
                     this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
                 }

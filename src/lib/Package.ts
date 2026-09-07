@@ -19,6 +19,13 @@ export type Package = [string,ArrayBuffer?] & {
     _afterSend?: () => void;
     /**
      * @description
+     * Called when the package is dropped from the buffer without being sent.
+     * Do not override or use this property.
+     * @internal
+     */
+    _onDrop?: () => void;
+    /**
+     * @description
      * The size of the package (used internally).
      * Do not override or use this property.
      * @internal
