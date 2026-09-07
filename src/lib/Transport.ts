@@ -649,14 +649,21 @@ export default class Transport {
                     obj[key] = new this.options.readStream(value['_s'],this);
                 }
                 else {
-                    const clone = {};
-                    let unescapedKey: string;
-                    for(const key in value) {
-                        unescapedKey = unescapePlaceholderSequence(key);
-                        clone[unescapedKey] = value[key];
-                        this._internalResolveMixedJSONDeep(clone,unescapedKey,options,meta);
+                    //resolve in place, keys are only renamed when they contain an escape sequence
+                    let renames: [string,string][] | undefined;
+                    for(const k in value) {
+                        const unescapedKey = unescapePlaceholderSequence(k);
+                        if(unescapedKey !== k) (renames || (renames = [])).push([k,unescapedKey]);
+                        else this._internalResolveMixedJSONDeep(value,k,options,meta);
                     }
-                    obj[key] = clone;
+                    if(renames) {
+                        for(let i = 0; i < renames.length; i++) {
+                            const [k,unescapedKey] = renames[i];
+                            value[unescapedKey] = value[k];
+                            delete value[k];
+                            this._internalResolveMixedJSONDeep(value,unescapedKey,options,meta);
+                        }
+                    }
                 }
             }
         }
@@ -711,44 +718,52 @@ export default class Transport {
                 else return data.toJSON();
             }
             else if(Array.isArray(data)) {
-                const newArray: any[] = [], len = data.length;
-                for (let i = 0; i < len; i++)
-                    newArray[i] = this._processMixedJSONDeep(data[i], binaries, streams);
-                return newArray;
+                //copy-on-write: only clone when a child changed
+                let clone: any[] | undefined;
+                for (let i = 0, len = data.length; i < len; i++) {
+                    const value = this._processMixedJSONDeep(data[i], binaries, streams);
+                    if(clone) clone[i] = value;
+                    else if(value !== data[i]) {
+                        clone = data.slice(0,i);
+                        clone[i] = value;
+                    }
+                }
+                return clone || data;
             }
             else if(!(data instanceof Date)) {
-                const clone = {};
+                //copy-on-write: only clone when a child or a key changed
+                let clone: Record<string,any> | undefined;
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[escapePlaceholderSequence(key)] = this._processMixedJSONDeep(data[key], binaries, streams);
+                    const value = this._processMixedJSONDeep(data[key], binaries, streams);
+                    const escapedKey = escapePlaceholderSequence(key);
+                    if(!clone && (value !== data[key] || escapedKey !== key)) {
+                        clone = {};
+                        for(const k in data) {
+                            if(k === key) break;
+                            clone[k] = data[k];
+                        }
+                    }
+                    if(clone) clone[escapedKey] = value;
                 }
-                return clone;
+                return clone || data;
             }
         }
         return data;
     }
 
     private _rejectBinaryContentResolver(err: Error) {
-        let resolver: BinaryContentResolver;
-        for(const k in this._binaryContentResolver) {
-            if(this._binaryContentResolver.hasOwnProperty(k)){
-                resolver = this._binaryContentResolver[k];
-                clearTimeout(resolver.timeout);
-                resolver.callback(err);
-            }
+        const resolvers = this._binaryContentResolver;
+        this._binaryContentResolver = new Map();
+        for(const resolver of resolvers.values()) {
+            clearTimeout(resolver.timeout);
+            resolver.callback(err);
         }
-        this._binaryContentResolver = {};
     }
 
     private _emitBadConnectionToStreams() {
-        for (const k in this._activeReadStreams) {
-            if (this._activeReadStreams.hasOwnProperty(k))
-                this._activeReadStreams[k]._emitBadConnection();
-        }
-        for (const k in this._activeWriteStreams) {
-            if (this._activeWriteStreams.hasOwnProperty(k))
-                this._activeWriteStreams[k]._emitBadConnection();
-        }
+        for (const stream of this._activeReadStreams.values()) stream._emitBadConnection();
+        for (const stream of this._activeWriteStreams.values()) stream._emitBadConnection();
     }
 
     /**
@@ -1227,18 +1242,35 @@ export default class Transport {
         if(typeof data === 'object' && data){
             if(data instanceof ArrayBuffer) return {_b: binaries.push(data) - 1};
             else if(Array.isArray(data)) {
-                const newArray: any[] = [], len = data.length;
-                for (let i = 0; i < len; i++)
-                    newArray[i] = Transport._processMultiMixedJSONDeep(data[i],binaries);
-                return newArray;
+                //copy-on-write: only clone when a child changed
+                let clone: any[] | undefined;
+                for (let i = 0, len = data.length; i < len; i++) {
+                    const value = Transport._processMultiMixedJSONDeep(data[i],binaries);
+                    if(clone) clone[i] = value;
+                    else if(value !== data[i]) {
+                        clone = data.slice(0,i);
+                        clone[i] = value;
+                    }
+                }
+                return clone || data;
             }
             else if(!(data instanceof Date)) {
-                const clone = {};
+                //copy-on-write: only clone when a child or a key changed
+                let clone: Record<string,any> | undefined;
                 for(const key in data) {
                     // noinspection JSUnfilteredForInLoop
-                    clone[escapePlaceholderSequence(key)] = Transport._processMultiMixedJSONDeep(data[key],binaries);
+                    const value = Transport._processMultiMixedJSONDeep(data[key],binaries);
+                    const escapedKey = escapePlaceholderSequence(key);
+                    if(!clone && (value !== data[key] || escapedKey !== key)) {
+                        clone = {};
+                        for(const k in data) {
+                            if(k === key) break;
+                            clone[k] = data[k];
+                        }
+                    }
+                    if(clone) clone[escapedKey] = value;
                 }
-                return clone;
+                return clone || data;
             }
         }
         return data;
