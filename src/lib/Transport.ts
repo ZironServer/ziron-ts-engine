@@ -27,7 +27,7 @@ import {
     RESOLVED_PROMISE,
     SendFunction, unescapePlaceholderSequence,
     Writable
-} from "./Utils";
+, EMPTY_FUNCTION} from "./Utils";
 import {
     BadConnectionError,
     BadConnectionType,
@@ -886,8 +886,12 @@ export default class Transport {
 
         if(!processComplexTypes) {
             pack.promise = new Promise<any>((resolve, reject) => {
-                pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
-                    'The invoke package was dropped from the buffer.'));
+                pack._onDrop = () => {
+                    //fire-and-forget invokes must not produce unhandled rejections
+                    pack.promise.catch(EMPTY_FUNCTION);
+                    reject(new BadConnectionError(BadConnectionType.Disconnect,
+                        'The invoke package was dropped from the buffer.'));
+                };
                 pack._afterSend = () => {
                     this._invokeResponsePromises.set(callId,{resolve, reject, returnDataType,
                         timeout: setTimeout(() => {
@@ -904,8 +908,12 @@ export default class Transport {
             let setResponse: (() => void) | undefined = undefined;
             let setResponseTimeout: (() => void) | undefined = undefined;
             pack.promise = new Promise<any>((resolve, reject) => {
-                pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
-                    'The invoke package was dropped from the buffer.'));
+                pack._onDrop = () => {
+                    //fire-and-forget invokes must not produce unhandled rejections
+                    pack.promise.catch(EMPTY_FUNCTION);
+                    reject(new BadConnectionError(BadConnectionType.Disconnect,
+                        'The invoke package was dropped from the buffer.'));
+                };
                 setResponse = () => {
                     this._invokeResponsePromises.set(callId,{resolve, reject, returnDataType});
                 }
