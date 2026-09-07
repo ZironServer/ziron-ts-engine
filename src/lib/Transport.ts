@@ -557,7 +557,8 @@ export default class Transport {
         }
         else {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
-            data = this._processMixedJSONDeep(data,binaries,streams);
+            const processedData = this._processMixedJSONDeep(data,binaries,streams);
+            if(binaries.length > 0 || streams.length > 0) data = processedData;
 
             const pack: Package = [
                 PacketType.InvokeDataResp + ',' + callId + ',' +
@@ -822,7 +823,8 @@ export default class Transport {
         }
         else {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
-            data = this._processMixedJSONDeep(data,binaries,streams);
+            const processedData = this._processMixedJSONDeep(data,binaries,streams);
+            if(binaries.length > 0 || streams.length > 0) data = processedData;
 
             const pack: Package = [
                 PacketType.Transmit + ',"' + receiver + '",' +
@@ -921,7 +923,8 @@ export default class Transport {
             }
             else {
                 const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
-                data = this._processMixedJSONDeep(data,binaries,streams);
+                const processedData = this._processMixedJSONDeep(data,binaries,streams);
+                if(binaries.length > 0 || streams.length > 0) data = processedData;
 
                 if(streams.length > 0) {
                     const sent = new Promise(res => pack._afterSend = () => {
@@ -1043,19 +1046,20 @@ export default class Transport {
         else if(this.options.chunksCanContainStreams && data instanceof WriteStream){
             const nestedStreamId = this._getNewStreamId(data.binary);
             this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
-                ',' + streamId + ',' + DataType.Stream + ',' + streamId);
-            data._init(this,streamId);
+                ',' + streamId + ',' + DataType.Stream + ',' + nestedStreamId);
+            data._init(this,nestedStreamId);
             data._onTransmitted();
         }
         else if(data instanceof ArrayBuffer)
             this.send(Transport._createBinaryStreamChunkPacket(streamId,new Uint8Array(data),end),true);
         else {
             const binaries: ArrayBuffer[] = [], streams: WriteStream<any>[] = [];
-            data = this._processMixedJSONDeep(data,binaries,streams);
+            const processedData = this._processMixedJSONDeep(data,binaries,streams);
+            if(binaries.length > 0 || streams.length > 0) data = processedData;
 
             const pack: Package = [
                 (end ? PacketType.StreamEnd : PacketType.StreamChunk) +
-                ',' + streamId + ',' + parseJSONDataType(binaries.length > 0 || streams.length > 0) +
+                ',' + streamId + ',' + parseJSONDataType(binaries.length > 0,streams.length > 0) +
                 (data !== undefined ? (',' + encodeJson(data)) : '')
             ];
 
@@ -1196,7 +1200,8 @@ export default class Transport {
         }
         else {
             const binaries: ArrayBuffer[] = [];
-            data = Transport._processMultiMixedJSONDeep(data,binaries);
+            const processedData = Transport._processMultiMixedJSONDeep(data,binaries);
+            if(binaries.length > 0) data = processedData;
             const pack: Package = [
                 PacketType.Transmit + ',"' + receiver + '",' +
                 parseJSONDataType(binaries.length > 0,false) +
