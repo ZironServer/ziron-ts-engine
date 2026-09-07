@@ -90,10 +90,8 @@ export default class DynamicGroupTransport {
         if(!buffer) {
             if(this._freeBuffers.length > 0)
                 buffer = this._freeBuffers.pop();
-            else {
-                buffer = new PackageBuffer(FREE_BUFFER_SEND_PLACEHOLDER,ALWAYS_OPEN,this.options);
-                buffer.afterFlush = () => this._freeGroupBuffer(group);
-            }
+            else buffer = new PackageBuffer(FREE_BUFFER_SEND_PLACEHOLDER,ALWAYS_OPEN,this.options);
+            buffer!.afterFlush = () => this._freeGroupBuffer(group);
             buffer!.send = (messages,batches) =>
                 this._multiSend(group,messages,batches);
             buffer!.isOpen = () => this.isConnected(group);
