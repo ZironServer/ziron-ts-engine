@@ -137,7 +137,7 @@ export default class WriteStream<B extends boolean = false> {
         const write = (...args: any) => {
             (this.write as any)(...args).then(result => {
                 if(result) callback(write as any,this.end);
-            });
+            }).catch(() => {});
         };
         callback(write as any,this.end);
     }
@@ -250,7 +250,10 @@ export default class WriteStream<B extends boolean = false> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
-        if(this.state !== StreamState.Open) await this.opened;
+        if(this.state !== StreamState.Open) {
+            await Promise.race([this.opened,this.closed]);
+            if((this.state as StreamState) !== StreamState.Open) return false;
+        }
         const availableSize = this.remainingSizeAllowed;
         try {
             this._writeLock = true;
@@ -287,7 +290,10 @@ export default class WriteStream<B extends boolean = false> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("Can not write when end was already called.");
-        if(this.state !== StreamState.Open) await this.opened;
+        if(this.state !== StreamState.Open) {
+            await Promise.race([this.opened,this.closed]);
+            if((this.state as StreamState) !== StreamState.Open) return false;
+        }
         try {
             this._writeLock = true;
             if(this.remainingSizeAllowed > 0) await this._sendObjectChunk(data,processComplexTypes);
@@ -317,7 +323,10 @@ export default class WriteStream<B extends boolean = false> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("End was already called.");
-        if(this.state !== StreamState.Open) await this.opened;
+        if(this.state !== StreamState.Open) {
+            await Promise.race([this.opened,this.closed]);
+            if((this.state as StreamState) !== StreamState.Open) return false;
+        }
 
         try {
             this._writeLock = true;
@@ -340,12 +349,15 @@ export default class WriteStream<B extends boolean = false> {
         if(this.state === StreamState.Closed) return false;
         if(this._writeLock) throw new Error("The previous write is still being processed.");
         if(this._eofSent) throw new Error("End was already called.");
-        if(this.state !== StreamState.Open) await this.opened;
+        if(this.state !== StreamState.Open) {
+            await Promise.race([this.opened,this.closed]);
+            if((this.state as StreamState) !== StreamState.Open) return false;
+        }
 
         try {
             this._writeLock = true;
             if(data === undefined) await this._sendStreamEnd();
-            if(this.remainingSizeAllowed > 0) await this._sendObjectChunk(data,processComplexTypes,true);
+            else if(this.remainingSizeAllowed > 0) await this._sendObjectChunk(data,processComplexTypes,true);
             else {
                 await this.waitForMoreSizePermission();
                 await this._sendObjectChunk(data,processComplexTypes,true);

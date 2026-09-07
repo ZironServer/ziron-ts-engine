@@ -1041,7 +1041,7 @@ export default class Transport {
                 ',' + streamId + ',' + DataType.JSON + (data !== undefined ? (',' + encodeJson(data)) : ''));
         }
         else if(this.options.chunksCanContainStreams && data instanceof WriteStream){
-            const streamId = this._getNewStreamId(data.binary);
+            const nestedStreamId = this._getNewStreamId(data.binary);
             this.send((end ? PacketType.StreamEnd : PacketType.StreamChunk) +
                 ',' + streamId + ',' + DataType.Stream + ',' + streamId);
             data._init(this,streamId);

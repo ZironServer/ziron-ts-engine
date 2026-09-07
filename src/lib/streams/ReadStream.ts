@@ -4,7 +4,7 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-import {Writable} from "../Utils";
+import {EMPTY_FUNCTION, Writable} from "../Utils";
 import {StreamCloseCode} from "./StreamCloseCode";
 import {StreamState} from "./StreamState";
 import Transport from "../Transport";
@@ -294,12 +294,15 @@ export default class ReadStream<T = any> {
             this._transport._sendStreamAllowMore(this.id,freeBufferSize);
             clearTimeout(this._allowMoreMinTimeout);
         }
-        else this._allowMoreMinTimeout = setTimeout(() => this._checkAllowMore(true),3000);
+        else {
+            clearTimeout(this._allowMoreMinTimeout);
+            this._allowMoreMinTimeout = setTimeout(() => this._checkAllowMore(true),3000);
+        }
     }
 
     async *[Symbol.asyncIterator] () {
-        const chunk = await this.read();
-        if(chunk !== null) yield chunk;
+        let chunk: T | null;
+        while((chunk = await this.read()) !== null) yield chunk;
     }
 
     /**
@@ -379,6 +382,8 @@ export default class ReadStream<T = any> {
      * @internal
      */
     _pushChunk(chunk: Promise<T> | ArrayBuffer, type: DataType) {
+        //the chunk may be skipped, avoid an unhandled rejection
+        if(!(chunk instanceof ArrayBuffer)) chunk.catch(EMPTY_FUNCTION);
         if(this.state === StreamState.Open && !this._chainEnd) {
 
             // The chunks in a binary stream are sent via binary
@@ -457,6 +462,7 @@ export default class ReadStream<T = any> {
     }
 
     private _processChainEnd() {
+        if(this._chainCancel || this.state !== StreamState.Open) return;
         this._transport._sendReadStreamClose(this.id);
         this._close(StreamCloseCode.End,true);
     }
@@ -488,6 +494,7 @@ export default class ReadStream<T = any> {
      */
     _close(closeCode: StreamCloseCode | number, rmFromTransport: boolean = true) {
         if(this.state === StreamState.Closed) return;
+        clearTimeout(this._allowMoreMinTimeout);
         (this as Writable<ReadStream>).state = StreamState.Closed;
         (this as Writable<ReadStream>).closeCode = closeCode;
         this._cancelChunkChain();
