@@ -188,7 +188,7 @@ export default class Transport {
      * because packages with old ids can exist.
      */
     private _binaryContentPacketId: number = 0;
-    private _binaryContentResolver: Record<number,BinaryContentResolver> = {};
+    private _binaryContentResolver: Map<number,BinaryContentResolver> = new Map();
 
     /**
      * Can not be reset on connection lost
@@ -196,21 +196,21 @@ export default class Transport {
      */
     private _objectStreamId: number = 1;
     private _binaryStreamId: number = -1;
-    private _activeReadStreams: Record<string, ReadStream> = {};
-    private _activeWriteStreams: Record<string, WriteStream> = {};
+    private _activeReadStreams: Map<number, ReadStream> = new Map();
+    private _activeWriteStreams: Map<number, WriteStream> = new Map();
 
     /**
      * Can not be reset on connection lost
      * because packages with old ids can exist.
      */
     private _cid: number = 0;
-    private _invokeResponsePromises: Record<number,
+    private _invokeResponsePromises: Map<number,
         {
             resolve: (data: any) => void,
             reject: (err: any) => void,
             timeout?: NodeJS.Timeout,
             returnDataType?: boolean
-        }> = {};
+        }> = new Map();
 
     public readonly open: boolean = true;
 
@@ -293,8 +293,8 @@ export default class Transport {
         this._rejectBinaryContentResolver(err);
         this._rejectInvokeRespPromises(err);
         this._emitBadConnectionToStreams();
-        this._activeReadStreams = {};
-        this._activeWriteStreams = {};
+        this._activeReadStreams.clear();
+        this._activeWriteStreams.clear();
     }
 
     emitConnection() {
@@ -309,12 +309,10 @@ export default class Transport {
 
     private _rejectInvokeRespPromises(err: Error) {
         const tmpPromises = this._invokeResponsePromises;
-        this._invokeResponsePromises = {};
-        for(const k in tmpPromises) {
-            if(tmpPromises.hasOwnProperty(k)){
-                clearTimeout(tmpPromises[k].timeout!);
-                tmpPromises[k].reject(err);
-            }
+        this._invokeResponsePromises = new Map();
+        for(const resp of tmpPromises.values()) {
+            clearTimeout(resp.timeout!);
+            resp.reject(err);
         }
     }
 
@@ -361,7 +359,7 @@ export default class Transport {
 
     private _processBinaryContentPacket(view: DataView, offset: number) {
         const id = view.getFloat64(offset)
-        const resolver = this._binaryContentResolver[id],
+        const resolver = this._binaryContentResolver.get(id),
             byteLength = view.byteLength,
             binaries: ArrayBuffer[] = [];
         let binaryLen: number | undefined = undefined;
@@ -375,7 +373,7 @@ export default class Transport {
             offset += binaryLen;
         }
         if(resolver){
-            delete this._binaryContentResolver[id];
+            this._binaryContentResolver.delete(id);
             clearTimeout(resolver.timeout);
             resolver.callback(null,binaries);
         }
@@ -394,6 +392,7 @@ export default class Transport {
         switch (packet['0']) {
             case PacketType.Transmit:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
+                if(packet['2'] === DataType.JSON) return this._processTransmit(packet['1'],packet['3'],DataType.JSON);
                 return this._processData(packet['2'],packet['3'],packet['4'],(err,data) => {
                     if(!err) this._processTransmit(packet['1'],data,packet['2']);
                     else if(!(err instanceof BadConnectionError)) this.onInvalidMessage(err);
@@ -401,15 +400,17 @@ export default class Transport {
             case PacketType.Invoke:
                 if(typeof packet['1'] !== 'string') return this.onInvalidMessage(new Error('Receiver is not a string.'));
                 if(typeof packet['2'] !== 'number') return this.onInvalidMessage(new Error('CallId is not a number.'));
+                if(packet['3'] === DataType.JSON) return this._processInvoke(packet['1'],packet['2'],packet['4'],DataType.JSON);
                 return this._processData(packet['3'],packet['4'],packet['5'],(err,data) => {
                     if(!err) this._processInvoke(packet['1'],packet['2'],data,packet['3']);
                     else if(!(err instanceof BadConnectionError)) this.onInvalidMessage(err);
                 });
             case PacketType.InvokeDataResp:
-                const resp = this._invokeResponsePromises[packet['1']];
+                const resp = this._invokeResponsePromises.get(packet['1']);
                 if (resp) {
                     clearTimeout(resp.timeout!);
-                    delete this._invokeResponsePromises[packet['1']];
+                    this._invokeResponsePromises.delete(packet['1']);
+                    if(packet['2'] === DataType.JSON) return resp.resolve(resp.returnDataType ? [packet['3'],DataType.JSON] : packet['3']);
                     return this._processData(packet['2'],packet['3'],packet['4'], (err,data) => {
                         if(!err) resp.resolve(resp.returnDataType ? [data,packet['2']] : data);
                         else if(err instanceof BadConnectionError) resp.reject(err);
@@ -429,41 +430,41 @@ export default class Transport {
     }
 
     private _rejectInvoke(callId: number, rawErr: any) {
-        const resp = this._invokeResponsePromises[callId];
+        const resp = this._invokeResponsePromises.get(callId);
         if (resp) {
             clearTimeout(resp.timeout!);
-            delete this._invokeResponsePromises[callId];
+            this._invokeResponsePromises.delete(callId);
             resp.reject(hydrateError(rawErr));
         }
     }
 
     private _processStreamAccept(streamId: number,bufferSize: number | any) {
         if(typeof bufferSize !== 'number') throw new Error('Invalid buffer size data type to accept a stream.');
-        const stream = this._activeWriteStreams[streamId];
+        const stream = this._activeWriteStreams.get(streamId);
         if(stream) stream._open(bufferSize);
     }
 
     private _processStreamDataPermission(streamId: number,size: number | any) {
         if(typeof size !== 'number') throw new Error('Invalid stream data permission size data type.');
-        const stream = this._activeWriteStreams[streamId];
+        const stream = this._activeWriteStreams.get(streamId);
         if(stream) stream._addDataPermission(size);
     }
 
     private _processReadStreamClose(streamId: number, closeCode?: StreamCloseCode | number) {
         if(typeof closeCode !== 'number' && typeof closeCode !== 'undefined')
             throw new Error('Invalid close code data type to close a stream.');
-        const stream = this._activeWriteStreams[streamId];
+        const stream = this._activeWriteStreams.get(streamId);
         if(stream) stream._readStreamClose(closeCode ?? StreamCloseCode.End);
     }
 
     private _processJsonWriteStreamClose(streamId: number, closeCode: StreamCloseCode | number) {
         if(typeof closeCode !== 'number') throw new Error('Invalid close code data type to close a stream.');
-        const stream = this._activeReadStreams[streamId];
+        const stream = this._activeReadStreams.get(streamId);
         if(stream) stream._writeStreamClose(closeCode);
     }
 
     private _processJsonStreamChunk(streamId: number, dataType: DataType, data: any, binariesPacketId?: number) {
-        const stream = this._activeReadStreams[streamId];
+        const stream = this._activeReadStreams.get(streamId);
         if(stream) {
             stream._pushChunk(new Promise((res,rej) => {
                 if(containsStreams(dataType) && !this.options.chunksCanContainStreams)
@@ -475,7 +476,7 @@ export default class Transport {
     }
 
     private _processJsonStreamEnd(streamId: number, dataType?: DataType, data?: any, binariesPacketId?: number) {
-        const stream = this._activeReadStreams[streamId];
+        const stream = this._activeReadStreams.get(streamId);
         if(stream) {
             if(typeof dataType === 'number') {
                 stream._pushChunk(new Promise((res,rej) => {
@@ -490,12 +491,12 @@ export default class Transport {
     }
 
     private _processBinaryStreamChunk(streamId: number, binary: ArrayBuffer) {
-        const stream = this._activeReadStreams[streamId];
+        const stream = this._activeReadStreams.get(streamId);
         if(stream) stream._pushChunk(binary,DataType.Binary);
     }
 
     private _processBinaryStreamEnd(streamId: number, binary: ArrayBuffer) {
-        const stream = this._activeReadStreams[streamId];
+        const stream = this._activeReadStreams.get(streamId);
         if(stream) {
             //Binary stream end package chunk is required.
             stream._pushChunk(binary,DataType.Binary);
@@ -604,14 +605,14 @@ export default class Transport {
     }
 
     private _resolveBinaryContent(binariesPacketId: number, callback: (error?: any,binaries?: ArrayBuffer[]) => void) {
-        if(this._binaryContentResolver[binariesPacketId]) throw new Error('Binaries resolver already exists.');
-        this._binaryContentResolver[binariesPacketId] = {
+        if(this._binaryContentResolver.has(binariesPacketId)) throw new Error('Binaries resolver already exists.');
+        this._binaryContentResolver.set(binariesPacketId,{
             callback,
             timeout: setTimeout(() => {
-                delete this._binaryContentResolver[binariesPacketId];
+                this._binaryContentResolver.delete(binariesPacketId);
                 callback(new TimeoutError(`Binaries resolver: ${binariesPacketId} not resolved in time.`,TimeoutType.BinaryResolve));
             }, this.options.binaryContentPacketTimeout)
-        };
+        });
     }
 
     private _resolveMixedJSONDeep(data: any,
@@ -757,7 +758,7 @@ export default class Transport {
      * @private
      */
     _addReadStream(id: number, stream: ReadStream) {
-        this._activeReadStreams[id] = stream;
+        this._activeReadStreams.set(id,stream);
     }
 
     /**
@@ -767,7 +768,7 @@ export default class Transport {
      * @private
      */
     _addWriteStream(id: number, stream: WriteStream<any>) {
-        this._activeWriteStreams[id] = stream;
+        this._activeWriteStreams.set(id,stream);
     }
 
     /**
@@ -776,7 +777,7 @@ export default class Transport {
      * @param id
      */
     _removeWriteStream(id: number) {
-        delete this._activeWriteStreams[id];
+        this._activeWriteStreams.delete(id);
     }
 
     /**
@@ -785,7 +786,7 @@ export default class Transport {
      * @private
      */
     _removeReadStream(id: number) {
-        delete this._activeReadStreams[id];
+        this._activeReadStreams.delete(id);
     }
 
     //Send
@@ -873,11 +874,11 @@ export default class Transport {
                 pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
                     'The invoke package was dropped from the buffer.'));
                 pack._afterSend = () => {
-                    this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
-                    this._invokeResponsePromises[callId].timeout = setTimeout(() => {
-                        delete this._invokeResponsePromises[callId];
-                        reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
-                    }, responseTimeout || this.options.responseTimeout);
+                    this._invokeResponsePromises.set(callId,{resolve, reject, returnDataType,
+                        timeout: setTimeout(() => {
+                            this._invokeResponsePromises.delete(callId);
+                            reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
+                        }, responseTimeout || this.options.responseTimeout)});
                 }
             });
             pack[0] = PacketType.Invoke + ',"' + procedure + '",' + callId + ',' +
@@ -891,12 +892,13 @@ export default class Transport {
                 pack._onDrop = () => reject(new BadConnectionError(BadConnectionType.Disconnect,
                     'The invoke package was dropped from the buffer.'));
                 setResponse = () => {
-                    this._invokeResponsePromises[callId] = returnDataType ? {resolve, reject, returnDataType} : {resolve, reject};
+                    this._invokeResponsePromises.set(callId,{resolve, reject, returnDataType});
                 }
                 setResponseTimeout = () => {
-                    if(this._invokeResponsePromises[callId] && this._invokeResponsePromises[callId].timeout === undefined)
-                        this._invokeResponsePromises[callId].timeout = setTimeout(() => {
-                            delete this._invokeResponsePromises[callId];
+                    const resp = this._invokeResponsePromises.get(callId);
+                    if(resp && resp.timeout === undefined)
+                        resp.timeout = setTimeout(() => {
+                            this._invokeResponsePromises.delete(callId);
                             reject(new TimeoutError(`Response for call id: "${callId}" timed out`,TimeoutType.InvokeResponse));
                         }, responseTimeout || this.options.responseTimeout);
                 }
