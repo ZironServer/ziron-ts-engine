@@ -246,11 +246,12 @@ export default class Transport {
         try {
             if(typeof rawMsg !== "string"){
                 if(rawMsg.byteLength === 1) {
-                    if((new Uint8Array(rawMsg))[0] === PING_UINT8) {
+                    const byte = (new Uint8Array(rawMsg))[0];
+                    if(byte === PING_UINT8) {
                         try {this.onPing();}
                         catch (err) {this.onListenerError(err)}
                     }
-                    else if((new Uint8Array(rawMsg))[0] === PONG_UINT8) {
+                    else if(byte === PONG_UINT8) {
                         try {this.onPong();}
                         catch (err) {this.onListenerError(err)}
                     }
@@ -352,9 +353,9 @@ export default class Transport {
         if(header === PacketType.BinaryContent)
             this._processBinaryContentPacket(new DataView(buffer),1)
         else if(header === PacketType.StreamChunk)
-            this._processBinaryStreamChunk((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
+            this._processBinaryStreamChunk((new DataView(buffer)).getFloat64(1,true),buffer.slice(9));
         else if(header === PacketType.StreamEnd)
-            this._processBinaryStreamEnd((new Float64Array(buffer.slice(1,9)))[0],buffer.slice(9));
+            this._processBinaryStreamEnd((new DataView(buffer)).getFloat64(1,true),buffer.slice(9));
         else this.onInvalidMessage(new Error('Unknown binary package header type.'))
     }
 
@@ -1101,7 +1102,7 @@ export default class Transport {
     private static _createBinaryStreamChunkPacket(streamId: number, binary: Uint8Array, end?: boolean): ArrayBuffer {
         const packetBuffer = new Uint8Array(9 + binary.byteLength);
         packetBuffer[0] = end ? PacketType.StreamEnd : PacketType.StreamChunk;
-        packetBuffer.set(new Uint8Array((new Float64Array([streamId])).buffer),1);
+        (new DataView(packetBuffer.buffer)).setFloat64(1,streamId,true);
         packetBuffer.set(binary,9);
         return packetBuffer.buffer;
     }

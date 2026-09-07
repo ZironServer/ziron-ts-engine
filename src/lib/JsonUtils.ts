@@ -4,14 +4,18 @@ GitHub: LucaCode
 Copyright(c) Ing. Luca Gian Scaringella
  */
 
-let cache: any[] = [];
-export const replacer = (key: string, value: any) =>
-    typeof value === "object" && value !== null ?
-        cache.includes(value) ? '[Circular]' : cache.push(value) && value : value;
+export function createSafeJsonReplacer(): (key: string, value: any) => any {
+    const seen = new WeakSet<object>();
+    return (_, value) => {
+        if(typeof value === "object" && value !== null) {
+            if(seen.has(value)) return '[Circular]';
+            seen.add(value);
+        }
+        return value;
+    };
+}
 export function safeJsonStringify(value: any): string {
-    const res = JSON.stringify(value,replacer);
-    cache = [];
-    return res;
+    return JSON.stringify(value,createSafeJsonReplacer());
 }
 
 export class JSONString extends String {}
