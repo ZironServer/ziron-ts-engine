@@ -30,7 +30,8 @@ export type MultiSendFunction = (messages: (ArrayBuffer | string)[],batches: boo
  */
 export function loadDefaults<T>(options: Partial<T>,defaults: T): T {
     for (const key in defaults) {
-        if(!options.hasOwnProperty(key)) options[key] = defaults[key];
+        //explicitly undefined options must not override the defaults
+        if(options[key] === undefined) options[key] = defaults[key];
     }
     return options as T;
 }
