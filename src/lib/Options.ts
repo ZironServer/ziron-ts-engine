@@ -14,8 +14,8 @@ export interface BatchOption {
      * When the buffer gets flushed, all packages from the buffer will be compressed sequence safe.
      * With a number, you can specify the maximum time a package should wait in the buffer.
      * Whenever the lowest time of all packages in the buffer is reached, the buffer gets flushed.
-     * The value 0 bundles the package only with the packages of the same event loop turn:
-     * the buffer is flushed at the end of the turn (setImmediate), without waiting for a timer.
+     * The value 0 bundles the package with the packages of the same event loop turn
+     * and flushes the buffer at the end of the turn.
      * A true value will push the package in the buffer but without any time limit.
      * So the flushing depends on other packages or on manually flushing the buffer.
      * Undefined or null will not batch the package when the socket is connected and sends it directly.
@@ -25,7 +25,7 @@ export interface BatchOption {
 
 /**
  * @description
- * Returns if a batch option value pushes the package into the buffer (a number including 0, or true).
+ * Returns if a batch option value pushes the package into the buffer.
  * @param batch
  */
 export function isBatched(batch: BatchOptionsValue): batch is number | true {

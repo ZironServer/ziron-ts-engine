@@ -9,10 +9,7 @@ import {Package} from "./Package";
 import {estimateMaxUTF8Size, loadDefaults, MultiSendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
-/**
- * Runs a callback at the end of the current event loop turn:
- * setImmediate in Node.js (after the I/O callbacks of the turn), a zero timeout elsewhere.
- */
+//The end of the current event loop turn: setImmediate in Node.js, a zero timeout elsewhere.
 const scheduleTurnEnd: (callback: () => void) => any = typeof setImmediate === 'function' ?
     setImmediate : (callback) => setTimeout(callback,0);
 const cancelTurnEnd: (handle: any) => void = typeof clearImmediate === 'function' ?
@@ -177,8 +174,7 @@ export default class PackageBuffer {
      * the maximum time a package should wait in the buffer.
      * Whenever the lowest time of all packages in the buffer is reached,
      * the buffer gets flushed.
-     * A batch of 0 flushes the buffer at the end of the current event loop turn,
-     * so all packages added within the same turn are sent together without waiting for a timer.
+     * A batch of 0 flushes the buffer at the end of the current event loop turn.
      * When the parameter is not provided or has a true value,
      * flushing depends on other packages or manually flushing the buffer.
      * Notice when the underlying source is not open,
