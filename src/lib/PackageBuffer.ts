@@ -9,6 +9,15 @@ import {Package} from "./Package";
 import {estimateMaxUTF8Size, loadDefaults, MultiSendFunction} from "./Utils";
 import {InsufficientBufferSizeError} from "./Errors";
 
+/**
+ * Runs a callback at the end of the current event loop turn:
+ * setImmediate in Node.js (after the I/O callbacks of the turn), a zero timeout elsewhere.
+ */
+const scheduleTurnEnd: (callback: () => void) => any = typeof setImmediate === 'function' ?
+    setImmediate : (callback) => setTimeout(callback,0);
+const cancelTurnEnd: (handle: any) => void = typeof clearImmediate === 'function' ?
+    clearImmediate : (handle) => clearTimeout(handle);
+
 export interface PackageBufferOptions {
     /**
      * @description
@@ -93,6 +102,7 @@ export default class PackageBuffer {
     private _bufferTimeoutDelay: number | undefined;
     private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
     private _bufferTimeoutTimestamp: number | undefined;
+    private _bufferTurnTicker: any;
 
     public static readonly DEFAULT_OPTIONS: Readonly<PackageBufferOptions> = {
         maxBufferSize: Number.POSITIVE_INFINITY,
@@ -141,7 +151,12 @@ export default class PackageBuffer {
 
     private _onBatchTimeout = () => {
         this._bufferTimeoutTicker = undefined;
-        if(this.isOpen()) this._internalFlushBuffer();
+        if(this.isOpen()) this._flushBuffer();
+    }
+
+    private _onBatchTurnEnd = () => {
+        this._bufferTurnTicker = undefined;
+        if(this.isOpen()) this._flushBuffer();
     }
 
     /**
@@ -162,6 +177,8 @@ export default class PackageBuffer {
      * the maximum time a package should wait in the buffer.
      * Whenever the lowest time of all packages in the buffer is reached,
      * the buffer gets flushed.
+     * A batch of 0 flushes the buffer at the end of the current event loop turn,
+     * so all packages added within the same turn are sent together without waiting for a timer.
      * When the parameter is not provided or has a true value,
      * flushing depends on other packages or manually flushing the buffer.
      * Notice when the underlying source is not open,
@@ -201,10 +218,7 @@ export default class PackageBuffer {
         if(index !== -1) {
             this._buffer.splice(index,1);
             this._bufferSize -= pack._size!;
-            if(this._buffer.length === 0 && this._bufferTimeoutTicker) {
-                clearTimeout(this._bufferTimeoutTicker);
-                this._bufferTimeoutTicker = undefined;
-            }
+            if(this._buffer.length === 0) this._clearBufferTimeout();
             return true;
         }
         return false;
@@ -216,6 +230,12 @@ export default class PackageBuffer {
     }
 
     private _setBatchTime(time: number) {
+        if(time <= 0) {
+            if(this._bufferTurnTicker === undefined)
+                this._bufferTurnTicker = scheduleTurnEnd(this._onBatchTurnEnd);
+            return;
+        }
+        if(this._bufferTurnTicker !== undefined) return;
         if(this._bufferTimeoutTicker) {
             if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > time){
                 clearTimeout(this._bufferTimeoutTicker);
@@ -229,6 +249,10 @@ export default class PackageBuffer {
         if(this._bufferTimeoutTicker) {
             clearTimeout(this._bufferTimeoutTicker);
             this._bufferTimeoutTicker = undefined;
+        }
+        if(this._bufferTurnTicker !== undefined) {
+            cancelTurnEnd(this._bufferTurnTicker);
+            this._bufferTurnTicker = undefined;
         }
     }
 

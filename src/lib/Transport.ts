@@ -42,6 +42,7 @@ import {
     BatchOption,
     BatchOptionsValue,
     ComplexTypesOption,
+    isBatched,
     ResponseTimeoutOption,
     ReturnDataTypeOption
 } from "./Options";
@@ -987,13 +988,13 @@ export default class Transport {
     // noinspection JSUnusedGlobalSymbols
     sendPackage(pack: Package, batch?: BatchOptionsValue): void {
         if(!this.open) this.buffer.add(pack);
-        else if(batch) this.buffer.add(pack,batch);
+        else if(isBatched(batch)) this.buffer.add(pack,batch);
         else this._directSendPackage(pack);
     }
 
     // noinspection JSUnusedGlobalSymbols
     sendPackageWithPromise(pack: Package, batch?: BatchOptionsValue): Promise<void> {
-        if(batch) {
+        if(isBatched(batch)) {
             return new Promise((resolve) => {
                 const tmpAfterSend = pack._afterSend;
                 pack._afterSend = () => {

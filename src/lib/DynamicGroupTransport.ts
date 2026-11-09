@@ -8,7 +8,7 @@ import Transport from "./Transport";
 import {EMPTY_FUNCTION, GroupCorkFunction, GroupSendFunction, loadDefaults} from "./Utils";
 import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {Package} from "./Package";
-import {BatchOption, ComplexTypesOption} from "./Options";
+import {BatchOption, ComplexTypesOption, isBatched} from "./Options";
 
 export interface DynamicGroupTransportOptions extends PackageBufferOptions {
     /**
@@ -144,7 +144,7 @@ export default class DynamicGroupTransport {
     transmit(group: string,receiver: string, data?: any, options: BatchOption & ComplexTypesOption = {}) {
         const pack = Transport.prepareMultiTransmit(receiver,data,options);
         if(!this.isConnected(group)) this.getGroupBuffer(group).add(pack);
-        else if(options.batch) this.getGroupBuffer(group).add(pack,options.batch);
+        else if(isBatched(options.batch)) this.getGroupBuffer(group).add(pack,options.batch);
         else this._directSendMultiTransmit(group,pack);
     }
 

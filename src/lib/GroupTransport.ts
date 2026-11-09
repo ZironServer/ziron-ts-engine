@@ -8,7 +8,7 @@ import PackageBuffer, {PackageBufferOptions} from "./PackageBuffer";
 import {Package} from "./Package";
 import Transport from "./Transport";
 import {CorkFunction, loadDefaults, SendFunction} from "./Utils";
-import {BatchOption, ComplexTypesOption} from "./Options";
+import {BatchOption, ComplexTypesOption, isBatched} from "./Options";
 
 export interface GroupTransportOptions extends PackageBufferOptions {}
 
@@ -100,7 +100,7 @@ export default class GroupTransport {
     transmit(receiver: string, data?: any, options: BatchOption & ComplexTypesOption = {}) {
         const pack = Transport.prepareMultiTransmit(receiver,data,options);
         if(!this.isConnected()) this.buffer.add(pack);
-        else if(options.batch) this.buffer.add(pack,options.batch);
+        else if(isBatched(options.batch)) this.buffer.add(pack,options.batch);
         else this._directSendMultiTransmit(pack);
     }
 }

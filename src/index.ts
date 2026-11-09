@@ -31,7 +31,7 @@ import PackageBuffer, {PackageBufferOptions} from "./lib/PackageBuffer";
 import GroupTransport, {GroupTransportOptions} from "./lib/GroupTransport";
 import {MAX_SUPPORTED_ARRAY_BUFFER_SIZE, sendPackage} from "./lib/Utils";
 import {PING, PONG} from "./lib/Protocol";
-import {BatchOption, BatchOptionsValue, ComplexTypesOption, ResponseTimeoutOption, ReturnDataTypeOption} from "./lib/Options";
+import {BatchOption, BatchOptionsValue, ComplexTypesOption, isBatched, ResponseTimeoutOption, ReturnDataTypeOption} from "./lib/Options";
 import DynamicGroupTransport, {DynamicGroupTransportOptions} from "./lib/DynamicGroupTransport";
 
 export {
@@ -69,6 +69,7 @@ export {
     ComplexTypesOption,
     BatchOption,
     BatchOptionsValue,
+    isBatched,
     ResponseTimeoutOption,
     ReturnDataTypeOption,
     hydrateError,

@@ -3,8 +3,10 @@ import {
   BadConnectionError,
   BadConnectionType,
   DataType, DynamicGroupTransport, GroupTransport, InsufficientBufferSizeError,
+  isBatched,
   JSONString,
   Package,
+  PackageBuffer,
   ReadStream,
   StreamCloseError,
   StreamCloseCode,
@@ -999,6 +1001,135 @@ describe('Ziron', () => {
         comA1.transmit('batch',data,{batch: 100,
           processComplexTypes: i % 4 === 0 || i % 10 === 0});
       }
+    });
+
+    describe('Batch 0 (one bundle per event loop turn)', () => {
+      const createBuffer = () => {
+        const sends: (ArrayBuffer | string)[][] = [];
+        const buffer = new PackageBuffer((messages) => sends.push(messages));
+        return {buffer, sends};
+      };
+
+      it('Should count 0 as batched, but not null or undefined.', () => {
+        expect(isBatched(0)).to.be.true;
+        expect(isBatched(50)).to.be.true;
+        expect(isBatched(true)).to.be.true;
+        expect(isBatched(null)).to.be.false;
+        expect(isBatched(undefined)).to.be.false;
+      });
+
+      it('Should send N packages of one turn as exactly one message at the end of the turn.', (done) => {
+        const {buffer, sends} = createBuffer();
+        const count = 25;
+        for(let i = 0; i < count; i++) buffer.add(Transport.prepareMultiTransmit('turn',i),0);
+        expect(sends.length).to.be.equal(0);
+        setImmediate(() => {
+          expect(sends.length).to.be.equal(1);
+          expect(sends[0].length).to.be.equal(1);
+          const bundle = sends[0][0] as string;
+          expect(JSON.parse(bundle.substring(bundle.indexOf(',') + 1)).length).to.be.equal(count);
+          expect(buffer.getBufferLength()).to.be.equal(0);
+          done();
+        });
+      });
+
+      it('Should send a single package at the end of its turn without waiting for a timer.', (done) => {
+        const {buffer, sends} = createBuffer();
+        const start = Date.now();
+        buffer.add(Transport.prepareMultiTransmit('turn','one'),0);
+        setImmediate(() => {
+          expect(sends.length).to.be.equal(1);
+          expect(Date.now() - start).to.be.lessThan(20);
+          done();
+        });
+      });
+
+      it('Should bundle each turn on its own.', (done) => {
+        const {buffer, sends} = createBuffer();
+        buffer.add(Transport.prepareMultiTransmit('turn',1),0);
+        buffer.add(Transport.prepareMultiTransmit('turn',2),0);
+        setImmediate(() => {
+          buffer.add(Transport.prepareMultiTransmit('turn',3),0);
+          setImmediate(() => {
+            expect(sends.length).to.be.equal(2);
+            done();
+          });
+        });
+      });
+
+      it('Should flush packages with a pending timer at the end of the turn as well.', (done) => {
+        const {buffer, sends} = createBuffer();
+        buffer.add(Transport.prepareMultiTransmit('turn','late'),100);
+        buffer.add(Transport.prepareMultiTransmit('turn','now'),0);
+        buffer.add(Transport.prepareMultiTransmit('turn','late again'),100);
+        setImmediate(() => {
+          expect(sends.length).to.be.equal(1);
+          expect(buffer.getBufferLength()).to.be.equal(0);
+          setTimeout(() => {
+            expect(sends.length).to.be.equal(1);
+            done();
+          },130);
+        });
+      });
+
+      it('Should not send when the only package was removed in the same turn.', (done) => {
+        const {buffer, sends} = createBuffer();
+        const pack = Transport.prepareMultiTransmit('turn','gone');
+        buffer.add(pack,0);
+        expect(buffer.tryRemove(pack)).to.be.true;
+        setImmediate(() => {
+          expect(sends.length).to.be.equal(0);
+          done();
+        });
+      });
+
+      it('Should keep the packages while the source is closed and send them on a flush.', (done) => {
+        let open = false;
+        const sends: (ArrayBuffer | string)[][] = [];
+        const buffer = new PackageBuffer((messages) => sends.push(messages),() => open);
+        buffer.add(Transport.prepareMultiTransmit('turn',1),0);
+        setImmediate(() => {
+          expect(sends.length).to.be.equal(0);
+          expect(buffer.getBufferLength()).to.be.equal(1);
+          open = true;
+          expect(buffer.flushBuffer()).to.be.true;
+          expect(sends.length).to.be.equal(1);
+          done();
+        });
+      });
+
+      it('Should receive all transmits with batch 0 in order.', (done) => {
+        const count = 40;
+        const received: any[] = [];
+        comB1.onTransmit = (receiver,data) => {
+          expect(receiver).to.be.equal('turn');
+          received.push(data);
+          if(received.length === count) {
+            expect(received).to.be.deep.equal(generateArray(count,(i) => i));
+            done();
+          }
+        };
+        comA1.options.maxBufferChunkLength = 200;
+        comA1.options.limitBatchStringLength = 310000;
+        for(let i = 0; i < count; i++) comA1.transmit('turn',i,{batch: 0});
+      });
+
+      it('Should send group transmits with batch 0 of one turn as one message per group.', (done) => {
+        const sends: Record<string,number> = {};
+        const group = new DynamicGroupTransport({
+          send: (group) => {sends[group] = (sends[group] || 0) + 1;},
+          isConnected: () => true
+        });
+        for(let i = 0; i < 10; i++) {
+          group.transmit('A','turn',i,{batch: 0});
+          group.transmit('B','turn',i,{batch: 0});
+        }
+        expect(sends).to.be.deep.equal({});
+        setImmediate(() => {
+          expect(sends).to.be.deep.equal({A: 1, B: 1});
+          done();
+        });
+      });
     });
 
     it('Should not send cancelled batch packages.', (done) => {
