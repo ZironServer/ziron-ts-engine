@@ -12,8 +12,26 @@ import {InsufficientBufferSizeError} from "./Errors";
 //The end of the current event loop turn: setImmediate in Node.js, a zero timeout elsewhere.
 const scheduleTurnEnd: (callback: () => void) => any = typeof setImmediate === 'function' ?
     setImmediate : (callback) => setTimeout(callback,0);
-const cancelTurnEnd: (handle: any) => void = typeof clearImmediate === 'function' ?
-    clearImmediate : (handle) => clearTimeout(handle);
+
+/**
+ * The buffers that flush at the end of the current turn: one callback for all of them.
+ */
+let turnBuffers: PackageBuffer[] = [];
+
+function flushTurnBuffers() {
+    const buffers = turnBuffers;
+    turnBuffers = [];
+    let error: any, failed = false;
+    for(let i = 0; i < buffers.length; i++) {
+        try {buffers[i]._onBatchTurnEnd();}
+        catch (err) {if(!failed) {failed = true; error = err;}}
+    }
+    if(failed) throw error;
+}
+
+function addTurnBuffer(buffer: PackageBuffer) {
+    if(turnBuffers.push(buffer) === 1) scheduleTurnEnd(flushTurnBuffers);
+}
 
 export interface PackageBufferOptions {
     /**
@@ -99,7 +117,7 @@ export default class PackageBuffer {
     private _bufferTimeoutDelay: number | undefined;
     private _bufferTimeoutTicker: NodeJS.Timeout | undefined;
     private _bufferTimeoutTimestamp: number | undefined;
-    private _bufferTurnTicker: any;
+    private _inTurn: boolean = false;
 
     public static readonly DEFAULT_OPTIONS: Readonly<PackageBufferOptions> = {
         maxBufferSize: Number.POSITIVE_INFINITY,
@@ -151,8 +169,12 @@ export default class PackageBuffer {
         if(this.isOpen()) this._flushBuffer();
     }
 
-    private _onBatchTurnEnd = () => {
-        this._bufferTurnTicker = undefined;
+    /**
+     * @internal
+     */
+    public _onBatchTurnEnd() {
+        if(!this._inTurn) return;
+        this._inTurn = false;
         if(this.isOpen()) this._flushBuffer();
     }
 
@@ -227,11 +249,13 @@ export default class PackageBuffer {
 
     private _setBatchTime(time: number) {
         if(time <= 0) {
-            if(this._bufferTurnTicker === undefined)
-                this._bufferTurnTicker = scheduleTurnEnd(this._onBatchTurnEnd);
+            if(!this._inTurn) {
+                this._inTurn = true;
+                addTurnBuffer(this);
+            }
             return;
         }
-        if(this._bufferTurnTicker !== undefined) return;
+        if(this._inTurn) return;
         if(this._bufferTimeoutTicker) {
             if(((this._bufferTimeoutDelay! - Date.now()) + this._bufferTimeoutTimestamp!) > time){
                 clearTimeout(this._bufferTimeoutTicker);
@@ -246,10 +270,8 @@ export default class PackageBuffer {
             clearTimeout(this._bufferTimeoutTicker);
             this._bufferTimeoutTicker = undefined;
         }
-        if(this._bufferTurnTicker !== undefined) {
-            cancelTurnEnd(this._bufferTurnTicker);
-            this._bufferTurnTicker = undefined;
-        }
+        //it stays in the list of the turn, which skips it
+        this._inTurn = false;
     }
 
     private _setBufferTimeout(ms: number) {

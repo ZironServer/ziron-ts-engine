@@ -1044,6 +1044,42 @@ describe('Ziron', () => {
         });
       });
 
+      it('Should flush the buffers of one turn together, in the order of their first package.', (done) => {
+        const order: string[] = [];
+        const buffers = ['a', 'b', 'c'].map(name => new PackageBuffer(() => order.push(name)));
+        buffers[1].add(Transport.prepareMultiTransmit('turn',1),0);
+        buffers[0].add(Transport.prepareMultiTransmit('turn',2),0);
+        buffers[1].add(Transport.prepareMultiTransmit('turn',3),0);
+        buffers[2].add(Transport.prepareMultiTransmit('turn',4),0);
+        //flushed by hand before the end of the turn: not again
+        buffers[2].flushBuffer();
+        expect(order).to.be.deep.equal(['c']);
+        setImmediate(() => {
+          expect(order).to.be.deep.equal(['c', 'b', 'a']);
+          buffers[0].add(Transport.prepareMultiTransmit('turn',5),0);
+          setImmediate(() => {
+            expect(order).to.be.deep.equal(['c', 'b', 'a', 'a']);
+            done();
+          });
+        });
+      });
+
+      it('Should flush the other buffers of the turn when the send of one throws.', (done) => {
+        const sent: string[] = [];
+        const failing = new PackageBuffer(() => {throw new Error('send failed');});
+        const fine = new PackageBuffer(() => sent.push('fine'));
+        failing.add(Transport.prepareMultiTransmit('turn',1),0);
+        fine.add(Transport.prepareMultiTransmit('turn',2),0);
+        const listeners = process.listeners('uncaughtException');
+        process.removeAllListeners('uncaughtException');
+        process.once('uncaughtException', (err) => {
+          for(const listener of listeners) process.on('uncaughtException',listener);
+          expect(err.message).to.be.equal('send failed');
+          expect(sent).to.be.deep.equal(['fine']);
+          done();
+        });
+      });
+
       it('Should bundle each turn on its own.', (done) => {
         const {buffer, sends} = createBuffer();
         buffer.add(Transport.prepareMultiTransmit('turn',1),0);
