@@ -1,7 +1,7 @@
 {
   "name": "ziron-engine",
   "description": "The Ziron typescript engine.",
-  "version": "2.5.0",
+  "version": "2.6.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "license": "UNLICENSED",
